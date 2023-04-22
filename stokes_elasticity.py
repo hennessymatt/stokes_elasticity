@@ -13,8 +13,7 @@ meshname = 'channel_sphere'
     parameters
 """
 
-U_0 = Constant(0.0)
-
+eps = Constant(0.01)
 
 # computational parameters
 Nt = 100
@@ -29,10 +28,10 @@ snes_solver_parameters = {"snes_solver": {"linear_solver": "mumps",
 parameters["ghost_mode"] = "shared_facet"
 
 
-# output = XDMFFile("output/" + fname + "drop_beam.xdmf")
-# output.parameters["rewrite_function_mesh"] = False
-# output.parameters["functions_share_mesh"] = True
-# output.parameters["flush_output"] = True
+output = XDMFFile("output/" + "stokes_elasticity.xdmf")
+output.parameters["rewrite_function_mesh"] = False
+output.parameters["functions_share_mesh"] = True
+output.parameters["flush_output"] = True
 
 
 
@@ -50,6 +49,7 @@ inlet = 3
 outlet = 4
 wall = 5
 solid_axis = 6
+center = 7
 
 # define the domains
 fluid = 10
@@ -58,7 +58,6 @@ solid = 11
 Of = generate_subdomain_restriction(mesh, subdomains, fluid)
 Os = generate_subdomain_restriction(mesh, subdomains, solid)
 Sig = generate_interface_restriction(mesh, subdomains, {fluid, solid})
-Sig_w = generate_subdomain_restriction(mesh, subdomains, wall)
 
 dx = Measure("dx", domain=mesh, subdomain_data=subdomains)
 ds = Measure("ds", domain=mesh, subdomain_data=bdry)
@@ -75,34 +74,38 @@ P2 = VectorElement("CG", mesh.ufl_cell(), 2)
 P1 = FiniteElement("CG", mesh.ufl_cell(), 1)
 DGT = VectorElement("DGT", mesh.ufl_cell(), 1)
 P0 = FiniteElement("R", mesh.ufl_cell(), 0)
+
 mixed_element = BlockElement(P2, P1, P2, P1, DGT, P0)
-V = BlockFunctionSpace(mesh, mixed_element, restrict = [Of, Of, Os, Os, Sig, Sig_w])
+V = BlockFunctionSpace(mesh, mixed_element, restrict = [Of, Of, Os, Os, Sig, Sig])
 
 # unknowns and test functions
 Y = BlockTestFunction(V)
-(v_f, q_f, v_s, q_s, eta, Txz) = block_split(Y)
+(v_f, q_f, v_s, q_s, eta, V_0) = block_split(Y)
 
 Xt = BlockTrialFunction(V)
 
 X = BlockFunction(V)
-(u_f, p_f, u_s, p_s, lam, Sxz) = block_split(X)
+(u_f, p_f, u_s, p_s, lam, U_0) = block_split(X)
 
-# X_old = BlockFunction(V)
-# (u_d_old, p_old, C_old, u_b_old, lam_old) = block_split(X_old)
 
 #---------------------------------------------------------------------
 # boundary conditions
 #---------------------------------------------------------------------
 
+# def center(x):
+#     return near(x[0], 0) and near(x[1], 0)
 
-far_field = Expression(('1 - x[1] * x[1] / 0.25 - V_a', '0'), degree=0, V_a = U_0)
+far_field = Expression(('(1 - x[1] * x[1] / 0.25) * t', '0'), degree=0, t = 1)
+
 bc_inlet = DirichletBC(V.sub(0), far_field, bdry, inlet)
 bc_outlet = DirichletBC(V.sub(0), far_field, bdry, outlet)
-
-
 bc_fluid_axis = DirichletBC(V.sub(0).sub(1), Constant(0), bdry, fluid_axis)
+bc_wall = DirichletBC(V.sub(0), Constant((0, 0)), bdry, wall)
 
-bcs = BlockDirichletBC([bc_inlet, bc_outlet, bc_fluid_axis])
+bc_solid_axis = DirichletBC(V.sub(2).sub(1), Constant(0), bdry, solid_axis)
+bc_pin = DirichletBC(V.sub(2), Constant((0,0)), bdry, center, method="pointwise")
+
+bcs = BlockDirichletBC([bc_inlet, bc_outlet, bc_fluid_axis, bc_wall, bc_solid_axis])
 
 
 #---------------------------------------------------------------------
@@ -115,13 +118,11 @@ I = Identity(2)
 sigma_f = -p_f * I + grad(u_f) + grad(u_f).T
 
 # solids
-F = inv(I - grad(u_s))
-J = det(F)
+# F = inv(I - eps * grad(u_s))
+# B = F * F.T
+# sigma_s = -p_s * I + B / eps
 
-sigma_s = Constant(1000) * (F * F.T - p_s * I)
-
-
-
+sigma_s = -p_s *  I + grad(u_s) + grad(u_s).T
 
 
 #---------------------------------------------------------------------
@@ -129,21 +130,17 @@ sigma_s = Constant(1000) * (F * F.T - p_s * I)
 #---------------------------------------------------------------------
 
 # Incompressibility conditions
-ic_s = J - 1
 ic_f = div(u_f)
+ic_s = div(u_s)
 
-
-# FUN1 = -inner(sigma_f, grad(v_f)) * dx(fluid) + inner(lam("+"), v_f("+")) * dS + Sxz * v_f[0] * ds(wall)
-FUN1 = -inner(sigma_f, grad(v_f)) * dx(fluid) # + Sxz * v_f[0] * ds(wall)
+FUN1 = -inner(sigma_f, grad(v_f)) * dx(fluid) + inner(lam("+"), v_f("+")) * dS
 FUN2 = ic_f * q_f * dx(fluid)
 
-# FUN3 = -inner(sigma_s, grad(v_s)) * dx(solid) - inner(lam("-"), v_s("-")) * dS
-FUN3 = inner(u_s, v_s) * dx(solid)
-FUN4 = p_s * q_s * dx(solid)
+FUN3 = -inner(sigma_s, grad(v_s)) * dx(solid) - inner(lam("-"), v_s("-")) * dS
+FUN4 = ic_s * q_s * dx(solid)
 
-FUN5 = inner(avg(eta), u_f("+") - as_vector([U_0, 0])) * dS
-
-FUN6 = (u_f[0] - U_0) * Txz * ds(wall)
+FUN5 = inner(avg(eta), u_f("+") - as_vector([U_0("+"), 0])) * dS
+FUN6 = dot(as_vector([1, 0]), lam("+")) * V_0("+") * dS
 
 FUN = [FUN1, FUN2, FUN3, FUN4, FUN5, FUN6]
 
@@ -160,6 +157,11 @@ solver = BlockPETScSNESSolver(problem)
 solver.parameters.update(snes_solver_parameters["snes_solver"])
 
 # extract solution components
-(u_f, p_f, u_s, p_s, lam, Sxz) = X.block_split()
+(u_f, p_f, u_s, p_s, lam, U_0) = X.block_split()
 
 solver.solve()
+
+output.write(u_f, 0)
+output.write(u_s, 0)
+
+print(U_0.vector()[:])
