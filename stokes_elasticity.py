@@ -67,6 +67,9 @@ dS = dS(circle)
 # normal and tangent vectors
 nn = FacetNormal(mesh); tt = as_vector((-nn[1], nn[0]))
 
+mesh_f = SubMesh(mesh, subdomains, fluid)
+mesh_s = SubMesh(mesh, subdomains, solid)
+
 #---------------------------------------------------------------------
 # elements, function spaces, and test/trial functions
 #---------------------------------------------------------------------
@@ -103,7 +106,7 @@ bc_fluid_axis = DirichletBC(V.sub(0).sub(1), Constant(0), bdry, fluid_axis)
 bc_wall = DirichletBC(V.sub(0), Constant((0, 0)), bdry, wall)
 
 bc_solid_axis = DirichletBC(V.sub(2).sub(1), Constant(0), bdry, solid_axis)
-bc_pin = DirichletBC(V.sub(2), Constant((0,0)), bdry, center, method="pointwise")
+# bc_pin = DirichletBC(V.sub(2), Constant((0,0)), bdry, center, method="pointwise")
 
 bcs = BlockDirichletBC([bc_inlet, bc_outlet, bc_fluid_axis, bc_wall, bc_solid_axis])
 
@@ -159,9 +162,22 @@ solver.parameters.update(snes_solver_parameters["snes_solver"])
 # extract solution components
 (u_f, p_f, u_s, p_s, lam, U_0) = X.block_split()
 
+"""
+    quantities for separate meshes
+"""
+
+Vf = VectorFunctionSpace(mesh_f, "CG", 1)
+Vs = VectorFunctionSpace(mesh_s, "CG", 1)
+
+
+"""
+    solve
+"""
+
 solver.solve()
 
-output.write(u_f, 0)
-output.write(u_s, 0)
+# output.write(u_f, 0)
+output.write(project(u_f, VV), 0)
+output.write(project(u_s, VV), 0)
 
 print(U_0.vector()[:])
