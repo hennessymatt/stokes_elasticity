@@ -13,7 +13,7 @@ meshname = 'channel_sphere'
     parameters
 """
 
-eps = Constant(0.01)
+eps = Constant(0.1)
 
 # computational parameters
 Nt = 100
@@ -28,12 +28,16 @@ snes_solver_parameters = {"snes_solver": {"linear_solver": "mumps",
 parameters["ghost_mode"] = "shared_facet"
 
 
-output = XDMFFile("output/" + "stokes_elasticity.xdmf")
-output.parameters["rewrite_function_mesh"] = False
-output.parameters["functions_share_mesh"] = True
-output.parameters["flush_output"] = True
+output_f = XDMFFile("output/" + "stokes_elasticity_f.xdmf")
+output_f.parameters["rewrite_function_mesh"] = False
+output_f.parameters["functions_share_mesh"] = True
+output_f.parameters["flush_output"] = True
 
 
+output_s = XDMFFile("output/" + "stokes_elasticity_s.xdmf")
+output_s.parameters["rewrite_function_mesh"] = False
+output_s.parameters["functions_share_mesh"] = True
+output_s.parameters["flush_output"] = True
 
 #---------------------------------------------------------------------
 # problem geometry: mesh and boundaries
@@ -49,7 +53,7 @@ inlet = 3
 outlet = 4
 wall = 5
 solid_axis = 6
-center = 7
+solid_subaxis = 7
 
 # define the domains
 fluid = 10
@@ -106,9 +110,9 @@ bc_fluid_axis = DirichletBC(V.sub(0).sub(1), Constant(0), bdry, fluid_axis)
 bc_wall = DirichletBC(V.sub(0), Constant((0, 0)), bdry, wall)
 
 bc_solid_axis = DirichletBC(V.sub(2).sub(1), Constant(0), bdry, solid_axis)
-# bc_pin = DirichletBC(V.sub(2), Constant((0,0)), bdry, center, method="pointwise")
+bc_pin = DirichletBC(V.sub(2), Constant((0, 0)), bdry, solid_subaxis)
 
-bcs = BlockDirichletBC([bc_inlet, bc_outlet, bc_fluid_axis, bc_wall, bc_solid_axis])
+bcs = BlockDirichletBC([bc_inlet, bc_outlet, bc_fluid_axis, bc_wall, bc_solid_axis, bc_pin])
 
 
 #---------------------------------------------------------------------
@@ -121,11 +125,11 @@ I = Identity(2)
 sigma_f = -p_f * I + grad(u_f) + grad(u_f).T
 
 # solids
-# F = inv(I - eps * grad(u_s))
-# B = F * F.T
-# sigma_s = -p_s * I + B / eps
+F = inv(I - grad(u_s))
+B = F * F.T
+sigma_s = -p_s * I + 1 / eps * (B - I)
 
-sigma_s = -p_s *  I + grad(u_s) + grad(u_s).T
+# sigma_s = -p_s *  I + grad(u_s) + grad(u_s).T
 
 
 #---------------------------------------------------------------------
@@ -134,7 +138,7 @@ sigma_s = -p_s *  I + grad(u_s) + grad(u_s).T
 
 # Incompressibility conditions
 ic_f = div(u_f)
-ic_s = div(u_s)
+ic_s = det(F) - 1
 
 FUN1 = -inner(sigma_f, grad(v_f)) * dx(fluid) + inner(lam("+"), v_f("+")) * dS
 FUN2 = ic_f * q_f * dx(fluid)
@@ -177,7 +181,7 @@ Vs = VectorFunctionSpace(mesh_s, "CG", 1)
 solver.solve()
 
 # output.write(u_f, 0)
-output.write(project(u_f, VV), 0)
-output.write(project(u_s, VV), 0)
+output_f.write(project(u_f, Vf), 0)
+output_s.write(project(u_s, Vs), 0)
 
 print(U_0.vector()[:])
