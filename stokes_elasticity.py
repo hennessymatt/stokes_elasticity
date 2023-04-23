@@ -1,23 +1,17 @@
 from dolfin import *
 from multiphenics import *
 from helpers import *
-# import numpy as np
-# import json
-# from pathlib import Path
+import numpy as np
 
 meshname = 'channel_sphere'
-
-# fname = 'dynamic/' + meshname + '/Pe_huge/E_one/'
 
 """
     parameters
 """
 
-eps = Constant(0.1)
-
-# computational parameters
-Nt = 100
-dt = 1e-3
+N = 50
+e_all = np.logspace(-3, -1, N)
+eps = Constant(e_all[0])
 
 
 snes_solver_parameters = {"snes_solver": {"linear_solver": "mumps",
@@ -29,13 +23,13 @@ parameters["ghost_mode"] = "shared_facet"
 
 
 output_f = XDMFFile("output/" + "stokes_elasticity_f.xdmf")
-output_f.parameters["rewrite_function_mesh"] = False
+output_f.parameters["rewrite_function_mesh"] = True
 output_f.parameters["functions_share_mesh"] = True
 output_f.parameters["flush_output"] = True
 
 
 output_s = XDMFFile("output/" + "stokes_elasticity_s.xdmf")
-output_s.parameters["rewrite_function_mesh"] = False
+output_s.parameters["rewrite_function_mesh"] = True
 output_s.parameters["functions_share_mesh"] = True
 output_s.parameters["flush_output"] = True
 
@@ -71,9 +65,6 @@ dS = dS(circle)
 # normal and tangent vectors
 nn = FacetNormal(mesh); tt = as_vector((-nn[1], nn[0]))
 
-mesh_f = SubMesh(mesh, subdomains, fluid)
-mesh_s = SubMesh(mesh, subdomains, solid)
-
 #---------------------------------------------------------------------
 # elements, function spaces, and test/trial functions
 #---------------------------------------------------------------------
@@ -98,9 +89,6 @@ X = BlockFunction(V)
 #---------------------------------------------------------------------
 # boundary conditions
 #---------------------------------------------------------------------
-
-# def center(x):
-#     return near(x[0], 0) and near(x[1], 0)
 
 far_field = Expression(('(1 - x[1] * x[1] / 0.25) * t', '0'), degree=0, t = 1)
 
@@ -169,19 +157,70 @@ solver.parameters.update(snes_solver_parameters["snes_solver"])
 """
     quantities for separate meshes
 """
-
+mesh_f = SubMesh(mesh, subdomains, fluid)
+mesh_s = SubMesh(mesh, subdomains, solid)
 Vf = VectorFunctionSpace(mesh_f, "CG", 1)
 Vs = VectorFunctionSpace(mesh_s, "CG", 1)
+u_f_only = Function(Vf)
+u_s_only = Function(Vs)
+
+def save(n):
+    u_f_only = project(u_f, Vf)
+    u_s_only = project(u_s, Vs)
+
+    output_f.write(u_f_only, n)
+    output_s.write(u_s_only, n)
+
+
+"""
+    setup the ALE problem
+"""
+
+V_ALE = BlockFunctionSpace(mesh, [P2, P1], restrict = [Of, Of])
+
+X_ALE = BlockFunction(V_ALE)
+(u_a, p_a) = block_split(X_ALE)
+Xt_ALE = BlockTrialFunction(V_ALE)
+Y_ALE = BlockTestFunction(V_ALE)
+(v_a, q_a) = block_split(Y_ALE)
+
+ac_inlet = DirichletBC(V_ALE.sub(0), Constant((0,0)), bdry, inlet)
+ac_outlet = DirichletBC(V_ALE.sub(0), Constant((0,0)), bdry, outlet)
+ac_fluid_axis = DirichletBC(V_ALE.sub(0), Constant((0,0)), bdry, fluid_axis)
+ac_wall = DirichletBC(V_ALE.sub(0), Constant((0, 0)), bdry, wall)
+ac_int = DirichletBC(V_ALE.sub(0), u_s, bdry, circle)
+bc_ALE = BlockDirichletBC([ac_inlet, ac_outlet, ac_fluid_axis, ac_wall, ac_int])
+
+# F_a = I + grad(u_a)
+# H_a = inv(F_a.T)
+# sigma_a = -p_a * H_a + F_a - H_a
+
+sigma_a = -p_a * I + grad(u_a) + grad(u_a).T
+
+F_ALE = [-inner(sigma_a, grad(v_a)) * dx(fluid), (p_a - 1e1 * div(u_a)) * q_a * dx(fluid)]
+J_ALE = block_derivative(F_ALE, X_ALE, Xt_ALE)
+
+problem_ALE = BlockNonlinearProblem(F_ALE, X_ALE, bc_ALE, J_ALE)
+solver_ALE = BlockPETScSNESSolver(problem_ALE)
+solver_ALE.parameters.update(snes_solver_parameters["snes_solver"])
 
 
 """
     solve
 """
 
-solver.solve()
+for n in range(N):
 
-# output.write(u_f, 0)
-output_f.write(project(u_f, Vf), 0)
-output_s.write(project(u_s, Vs), 0)
+    solver.solve()
+    solver_ALE.solve()
+    ALE.move(mesh, u_s)
+    ALE.move(mesh, u_a)
+    eps.assign(e_all[n])
+
+    # save(n)
+
+    output_f.write(u_f, n)
+    output_s.write(u_s, n)
+
 
 print(U_0.vector()[:])
