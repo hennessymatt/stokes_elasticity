@@ -4,13 +4,14 @@ from helpers import *
 import numpy as np
 
 meshname = 'channel_sphere'
+dir = '/media/eg21388/data/fenics/stokes_elasticity/'
 
 """
     parameters
 """
 
-N = 50
-e_all = np.logspace(-3, -1, N)
+N = 40
+e_all = np.logspace(-3, 0, N)
 eps = Constant(e_all[0])
 
 
@@ -22,14 +23,14 @@ snes_solver_parameters = {"snes_solver": {"linear_solver": "mumps",
 parameters["ghost_mode"] = "shared_facet"
 
 
-output_f = XDMFFile("output/" + "stokes_elasticity_f.xdmf")
-output_f.parameters["rewrite_function_mesh"] = True
+output_f = XDMFFile(dir + "fluid.xdmf")
+output_f.parameters["rewrite_function_mesh"] = False
 output_f.parameters["functions_share_mesh"] = True
 output_f.parameters["flush_output"] = True
 
 
-output_s = XDMFFile("output/" + "stokes_elasticity_s.xdmf")
-output_s.parameters["rewrite_function_mesh"] = True
+output_s = XDMFFile(dir + "solid.xdmf")
+output_s.parameters["rewrite_function_mesh"] = False
 output_s.parameters["functions_share_mesh"] = True
 output_s.parameters["flush_output"] = True
 
@@ -85,6 +86,18 @@ Xt = BlockTrialFunction(V)
 X = BlockFunction(V)
 (u_f, p_f, u_s, p_s, lam, U_0) = block_split(X)
 
+X_old = BlockFunction(V)
+(u_f_old, p_f_old, u_s_old, p_s_old, lam_old, U_0_old) = block_split(X_old)
+
+# ALE
+V_ALE = BlockFunctionSpace(mesh, [P2, P1], restrict = [Of, Of])
+
+X_ALE = BlockFunction(V_ALE)
+(u_a, p_a) = block_split(X_ALE)
+Xt_ALE = BlockTrialFunction(V_ALE)
+Y_ALE = BlockTestFunction(V_ALE)
+(v_a, q_a) = block_split(Y_ALE)
+
 
 #---------------------------------------------------------------------
 # boundary conditions
@@ -93,12 +106,14 @@ X = BlockFunction(V)
 far_field = Expression(('(1 - x[1] * x[1] / 0.25) * t', '0'), degree=0, t = 1)
 
 bc_inlet = DirichletBC(V.sub(0), far_field, bdry, inlet)
-bc_outlet = DirichletBC(V.sub(0), far_field, bdry, outlet)
+# bc_outlet = DirichletBC(V.sub(0), far_field, bdry, outlet)
+bc_outlet = DirichletBC(V.sub(1), Constant(0), bdry, outlet)
 bc_fluid_axis = DirichletBC(V.sub(0).sub(1), Constant(0), bdry, fluid_axis)
 bc_wall = DirichletBC(V.sub(0), Constant((0, 0)), bdry, wall)
 
 bc_solid_axis = DirichletBC(V.sub(2).sub(1), Constant(0), bdry, solid_axis)
 bc_pin = DirichletBC(V.sub(2), Constant((0, 0)), bdry, solid_subaxis)
+# bc_pres = DirichletBC(V.sub(3), Constant(0), bdry, solid_subaxis)
 
 bcs = BlockDirichletBC([bc_inlet, bc_outlet, bc_fluid_axis, bc_wall, bc_solid_axis, bc_pin])
 
@@ -110,23 +125,29 @@ bcs = BlockDirichletBC([bc_inlet, bc_outlet, bc_fluid_axis, bc_wall, bc_solid_ax
 I = Identity(2)
 
 # fluids
-sigma_f = -p_f * I + grad(u_f) + grad(u_f).T
+F_a = I + grad(u_a)
+H_a = inv(F_a.T)
+J_a = det(F_a)
+
+sigma_f = J_a * (-p_f * I + grad(u_f) + grad(u_f).T) * H_a
+ic_f = div(J_a * inv(F_a) * u_f)
 
 # solids
-F = inv(I - grad(u_s))
-B = F * F.T
-sigma_s = -p_s * I + 1 / eps * (B - I)
+F_old = I + grad(u_s_old)
+H_old = inv(F_old.T)
 
-# sigma_s = -p_s *  I + grad(u_s) + grad(u_s).T
+F = I + grad(u_s)
+H = inv(F.T)
+sigma_s = 1 / eps * (F - H) - p_s * H_old
+ic_s = det(F) - 1
 
+# sigma_s = -p_s * I + (grad(u_s) + grad(u_s).T)
+# ic_s = div(u_s)
 
 #---------------------------------------------------------------------
 # build equations
 #---------------------------------------------------------------------
 
-# Incompressibility conditions
-ic_f = div(u_f)
-ic_s = det(F) - 1
 
 FUN1 = -inner(sigma_f, grad(v_f)) * dx(fluid) + inner(lam("+"), v_f("+")) * dS
 FUN2 = ic_f * q_f * dx(fluid)
@@ -164,45 +185,46 @@ Vs = VectorFunctionSpace(mesh_s, "CG", 1)
 u_f_only = Function(Vf)
 u_s_only = Function(Vs)
 
+
 def save(n):
-    u_f_only = project(u_f, Vf)
+    # u_f_only = project(u_f, Vf)
     u_s_only = project(u_s, Vs)
 
-    output_f.write(u_f_only, n)
+    # output_f.write(u_f_only, n)
+
+    u_s_only.rename("u_s", "u_s")
     output_s.write(u_s_only, n)
 
 
 """
-    setup the ALE problem
+    BCs for the ALE problem
 """
 
-V_ALE = BlockFunctionSpace(mesh, [P2, P1], restrict = [Of, Of])
-
-X_ALE = BlockFunction(V_ALE)
-(u_a, p_a) = block_split(X_ALE)
-Xt_ALE = BlockTrialFunction(V_ALE)
-Y_ALE = BlockTestFunction(V_ALE)
-(v_a, q_a) = block_split(Y_ALE)
 
 ac_inlet = DirichletBC(V_ALE.sub(0), Constant((0,0)), bdry, inlet)
 ac_outlet = DirichletBC(V_ALE.sub(0), Constant((0,0)), bdry, outlet)
 ac_fluid_axis = DirichletBC(V_ALE.sub(0), Constant((0,0)), bdry, fluid_axis)
 ac_wall = DirichletBC(V_ALE.sub(0), Constant((0, 0)), bdry, wall)
 ac_int = DirichletBC(V_ALE.sub(0), u_s, bdry, circle)
+
+
 bc_ALE = BlockDirichletBC([ac_inlet, ac_outlet, ac_fluid_axis, ac_wall, ac_int])
+
+sigma_a = -p_a * I + grad(u_a) + grad(u_a).T
 
 # F_a = I + grad(u_a)
 # H_a = inv(F_a.T)
 # sigma_a = -p_a * H_a + F_a - H_a
 
-sigma_a = -p_a * I + grad(u_a) + grad(u_a).T
 
-F_ALE = [-inner(sigma_a, grad(v_a)) * dx(fluid), (p_a - 1e1 * div(u_a)) * q_a * dx(fluid)]
+F_ALE = [-inner(sigma_a, grad(v_a)) * dx(fluid), (p_a - 1e0 * div(u_a)) * q_a * dx(fluid)]
 J_ALE = block_derivative(F_ALE, X_ALE, Xt_ALE)
 
 problem_ALE = BlockNonlinearProblem(F_ALE, X_ALE, bc_ALE, J_ALE)
 solver_ALE = BlockPETScSNESSolver(problem_ALE)
 solver_ALE.parameters.update(snes_solver_parameters["snes_solver"])
+
+(u_a, p_a) = X_ALE.block_split()
 
 
 """
@@ -213,14 +235,16 @@ for n in range(N):
 
     solver.solve()
     solver_ALE.solve()
-    ALE.move(mesh, u_s)
-    ALE.move(mesh, u_a)
+
+    u_s_old.assign(u_s)
+
     eps.assign(e_all[n])
 
-    # save(n)
+    save(n)
 
-    output_f.write(u_f, n)
-    output_s.write(u_s, n)
-
+    # output_f.write(u_f, n)
+    # output_f.write(p_f, n)
+    # output_s.write(u_s, n)
+    # output_s.write(p_s, n)
 
 print(U_0.vector()[:])
