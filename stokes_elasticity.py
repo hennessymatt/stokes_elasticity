@@ -10,8 +10,9 @@ dir = '/media/eg21388/data/fenics/stokes_elasticity/'
     parameters
 """
 
-N = 40
-e_all = np.logspace(-3, 0, N)
+N = 100
+# e_all = np.logspace(-3, 0, N)
+e_all = np.linspace(1e-3, 0.5, N)
 eps = Constant(e_all[0])
 
 
@@ -129,7 +130,7 @@ F_a = I + grad(u_a)
 H_a = inv(F_a.T)
 J_a = det(F_a)
 
-sigma_f = J_a * (-p_f * I + grad(u_f) + grad(u_f).T) * H_a
+sigma_f = J_a * (-p_f * I + H_a * grad(u_f) + grad(u_f).T * H_a.T) * H_a
 ic_f = div(J_a * inv(F_a) * u_f)
 
 # solids
@@ -141,7 +142,7 @@ H = inv(F.T)
 sigma_s = 1 / eps * (F - H) - p_s * H_old
 ic_s = det(F) - 1
 
-# sigma_s = -p_s * I + (grad(u_s) + grad(u_s).T)
+# sigma_s = -p_s * I + (grad(u_s) + grad(u_s).T) / eps
 # ic_s = div(u_s)
 
 #---------------------------------------------------------------------
@@ -182,17 +183,23 @@ mesh_f = SubMesh(mesh, subdomains, fluid)
 mesh_s = SubMesh(mesh, subdomains, solid)
 Vf = VectorFunctionSpace(mesh_f, "CG", 1)
 Vs = VectorFunctionSpace(mesh_s, "CG", 1)
+
 u_f_only = Function(Vf)
+u_a_only = Function(Vf)
 u_s_only = Function(Vs)
 
 
 def save(n):
-    # u_f_only = project(u_f, Vf)
+    u_f_only = project(u_f, Vf)
+    u_a_only = project(u_a, Vf)
     u_s_only = project(u_s, Vs)
 
-    # output_f.write(u_f_only, n)
-
+    u_f_only.rename("u_f", "u_f")
+    u_a_only.rename("u_a", "u_a")
     u_s_only.rename("u_s", "u_s")
+
+    output_f.write(u_f_only, n)
+    output_f.write(u_a_only, n)
     output_s.write(u_s_only, n)
 
 
@@ -203,21 +210,22 @@ def save(n):
 
 ac_inlet = DirichletBC(V_ALE.sub(0), Constant((0,0)), bdry, inlet)
 ac_outlet = DirichletBC(V_ALE.sub(0), Constant((0,0)), bdry, outlet)
-ac_fluid_axis = DirichletBC(V_ALE.sub(0), Constant((0,0)), bdry, fluid_axis)
-ac_wall = DirichletBC(V_ALE.sub(0), Constant((0, 0)), bdry, wall)
+ac_fluid_axis = DirichletBC(V_ALE.sub(0).sub(1), Constant((0)), bdry, fluid_axis)
+ac_wall = DirichletBC(V_ALE.sub(0).sub(1), Constant((0)), bdry, wall)
 ac_int = DirichletBC(V_ALE.sub(0), u_s, bdry, circle)
 
 
 bc_ALE = BlockDirichletBC([ac_inlet, ac_outlet, ac_fluid_axis, ac_wall, ac_int])
 
 sigma_a = -p_a * I + grad(u_a) + grad(u_a).T
+ic_a = Constant(1) * div(u_a)
 
 # F_a = I + grad(u_a)
-# H_a = inv(F_a.T)
-# sigma_a = -p_a * H_a + F_a - H_a
+# E_a = 1/2 * (F_a.T * F_a - I)
+# sigma_a = -p_a * I + 2 * E_a
+# ic_a = tr(E_a)
 
-
-F_ALE = [-inner(sigma_a, grad(v_a)) * dx(fluid), (p_a - 1e0 * div(u_a)) * q_a * dx(fluid)]
+F_ALE = [-inner(sigma_a, grad(v_a)) * dx(fluid), (p_a - ic_a) * q_a * dx(fluid)]
 J_ALE = block_derivative(F_ALE, X_ALE, Xt_ALE)
 
 problem_ALE = BlockNonlinearProblem(F_ALE, X_ALE, bc_ALE, J_ALE)
@@ -233,7 +241,12 @@ solver_ALE.parameters.update(snes_solver_parameters["snes_solver"])
 
 for n in range(N):
 
+    print('-------------------------------------------------')
+    print(f'solving problem with eps[{n:d}] = {e_all[n]:.2e}')
+
+    print('solving FSI problem...')
     solver.solve()
+    print('updating fluid geometry')
     solver_ALE.solve()
 
     u_s_old.assign(u_s)
