@@ -10,16 +10,21 @@ dir = '/media/eg21388/data/fenics/stokes_elasticity/'
     parameters
 """
 
-N = 100
+N = 120
 # e_all = np.logspace(-3, 0, N)
-e_all = np.linspace(1e-3, 0.5, N)
+e_all = np.linspace(1e-2, 0.5, N)
+
+# N = 1
+# e_all = [1e-1]
+
 eps = Constant(e_all[0])
 
 
 snes_solver_parameters = {"snes_solver": {"linear_solver": "mumps",
                                           "maximum_iterations": 8,
                                           "report": True,
-                                          "error_on_nonconvergence": True}}
+                                          "absolute_tolerance": 1e-8,
+                                          "error_on_nonconvergence": False}}
 
 parameters["ghost_mode"] = "shared_facet"
 
@@ -75,29 +80,29 @@ P1 = FiniteElement("CG", mesh.ufl_cell(), 1)
 DGT = VectorElement("DGT", mesh.ufl_cell(), 1)
 P0 = FiniteElement("R", mesh.ufl_cell(), 0)
 
-mixed_element = BlockElement(P2, P1, P2, P1, DGT, P0)
-V = BlockFunctionSpace(mesh, mixed_element, restrict = [Of, Of, Os, Os, Sig, Sig])
+mixed_element = BlockElement(P2, P1, P2, P1, DGT, P0, P2, DGT)
+V = BlockFunctionSpace(mesh, mixed_element, restrict = [Of, Of, Os, Os, Sig, Sig, Of, Sig])
 
 # unknowns and test functions
 Y = BlockTestFunction(V)
-(v_f, q_f, v_s, q_s, eta, V_0) = block_split(Y)
+(v_f, q_f, v_s, q_s, eta, V_0, v_a, eta_a) = block_split(Y)
 
 Xt = BlockTrialFunction(V)
 
 X = BlockFunction(V)
-(u_f, p_f, u_s, p_s, lam, U_0) = block_split(X)
+(u_f, p_f, u_s, p_s, lam, U_0, u_a, lam_a) = block_split(X)
 
-X_old = BlockFunction(V)
-(u_f_old, p_f_old, u_s_old, p_s_old, lam_old, U_0_old) = block_split(X_old)
+# X_old = BlockFunction(V)
+# (u_f_old, p_f_old, u_s_old, p_s_old, lam_old, U_0_old) = block_split(X_old)
 
 # ALE
-V_ALE = BlockFunctionSpace(mesh, [P2, P1], restrict = [Of, Of])
-
-X_ALE = BlockFunction(V_ALE)
-(u_a, p_a) = block_split(X_ALE)
-Xt_ALE = BlockTrialFunction(V_ALE)
-Y_ALE = BlockTestFunction(V_ALE)
-(v_a, q_a) = block_split(Y_ALE)
+# V_ALE = BlockFunctionSpace(mesh, [P2, P1], restrict = [Of, Of])
+#
+# X_ALE = BlockFunction(V_ALE)
+# (u_a, p_a) = block_split(X_ALE)
+# Xt_ALE = BlockTrialFunction(V_ALE)
+# Y_ALE = BlockTestFunction(V_ALE)
+# (v_a, q_a) = block_split(Y_ALE)
 
 
 #---------------------------------------------------------------------
@@ -116,7 +121,17 @@ bc_solid_axis = DirichletBC(V.sub(2).sub(1), Constant(0), bdry, solid_axis)
 bc_pin = DirichletBC(V.sub(2), Constant((0, 0)), bdry, solid_subaxis)
 # bc_pres = DirichletBC(V.sub(3), Constant(0), bdry, solid_subaxis)
 
-bcs = BlockDirichletBC([bc_inlet, bc_outlet, bc_fluid_axis, bc_wall, bc_solid_axis, bc_pin])
+ac_inlet = DirichletBC(V.sub(6), Constant((0,0)), bdry, inlet)
+ac_outlet = DirichletBC(V.sub(6), Constant((0,0)), bdry, outlet)
+ac_fluid_axis = DirichletBC(V.sub(6).sub(1), Constant((0)), bdry, fluid_axis)
+ac_wall = DirichletBC(V.sub(6).sub(1), Constant((0)), bdry, wall)
+# ac_int = DirichletBC(V.sub(6), u_s, bdry, circle)
+
+
+# bc_ALE = BlockDirichletBC([ac_inlet, ac_outlet, ac_fluid_axis, ac_wall, ac_int])
+
+
+bcs = BlockDirichletBC([bc_inlet, bc_outlet, bc_fluid_axis, bc_wall, bc_solid_axis, bc_pin, ac_inlet, ac_outlet, ac_fluid_axis, ac_wall])
 
 
 #---------------------------------------------------------------------
@@ -133,13 +148,18 @@ J_a = det(F_a)
 sigma_f = J_a * (-p_f * I + H_a * grad(u_f) + grad(u_f).T * H_a.T) * H_a
 ic_f = div(J_a * inv(F_a) * u_f)
 
+# sigma_a = div(u_a) * I + grad(u_a) + grad(u_a).T
+
+E_a = 0.5 * (F_a.T * F_a - I)
+sigma_a = tr(E_a) * I + 2 * E_a
+
 # solids
-F_old = I + grad(u_s_old)
-H_old = inv(F_old.T)
+# F_old = I + grad(u_s_old)
+# H_old = inv(F_old.T)
 
 F = I + grad(u_s)
 H = inv(F.T)
-sigma_s = 1 / eps * (F - H) - p_s * H_old
+sigma_s = 1 / eps * (F - H) - p_s * H
 ic_s = det(F) - 1
 
 # sigma_s = -p_s * I + (grad(u_s) + grad(u_s).T) / eps
@@ -159,7 +179,10 @@ FUN4 = ic_s * q_s * dx(solid)
 FUN5 = inner(avg(eta), u_f("+") - as_vector([U_0("+"), 0])) * dS
 FUN6 = dot(as_vector([1, 0]), lam("+")) * V_0("+") * dS
 
-FUN = [FUN1, FUN2, FUN3, FUN4, FUN5, FUN6]
+FUN7 = -inner(sigma_a, grad(v_a)) * dx(fluid) + inner(lam_a("+"), v_a("+")) * dS
+FUN8 = inner(avg(eta_a), u_a("+") - u_s("-")) * dS
+
+FUN = [FUN1, FUN2, FUN3, FUN4, FUN5, FUN6, FUN7, FUN8]
 
 JAC = block_derivative(FUN, X, Xt)
 
@@ -174,7 +197,7 @@ solver = BlockPETScSNESSolver(problem)
 solver.parameters.update(snes_solver_parameters["snes_solver"])
 
 # extract solution components
-(u_f, p_f, u_s, p_s, lam, U_0) = X.block_split()
+(u_f, p_f, u_s, p_s, lam, U_0, u_a, lam_a) = X.block_split()
 
 """
     quantities for separate meshes
@@ -208,31 +231,31 @@ def save(n):
 """
 
 
-ac_inlet = DirichletBC(V_ALE.sub(0), Constant((0,0)), bdry, inlet)
-ac_outlet = DirichletBC(V_ALE.sub(0), Constant((0,0)), bdry, outlet)
-ac_fluid_axis = DirichletBC(V_ALE.sub(0).sub(1), Constant((0)), bdry, fluid_axis)
-ac_wall = DirichletBC(V_ALE.sub(0).sub(1), Constant((0)), bdry, wall)
-ac_int = DirichletBC(V_ALE.sub(0), u_s, bdry, circle)
+# ac_inlet = DirichletBC(V_ALE.sub(0), Constant((0,0)), bdry, inlet)
+# ac_outlet = DirichletBC(V_ALE.sub(0), Constant((0,0)), bdry, outlet)
+# ac_fluid_axis = DirichletBC(V_ALE.sub(0).sub(1), Constant((0)), bdry, fluid_axis)
+# ac_wall = DirichletBC(V_ALE.sub(0).sub(1), Constant((0)), bdry, wall)
+# ac_int = DirichletBC(V_ALE.sub(0), u_s, bdry, circle)
+#
+#
+# bc_ALE = BlockDirichletBC([ac_inlet, ac_outlet, ac_fluid_axis, ac_wall, ac_int])
 
-
-bc_ALE = BlockDirichletBC([ac_inlet, ac_outlet, ac_fluid_axis, ac_wall, ac_int])
-
-sigma_a = -p_a * I + grad(u_a) + grad(u_a).T
-ic_a = Constant(1) * div(u_a)
-
-# F_a = I + grad(u_a)
-# E_a = 1/2 * (F_a.T * F_a - I)
-# sigma_a = -p_a * I + 2 * E_a
-# ic_a = tr(E_a)
-
-F_ALE = [-inner(sigma_a, grad(v_a)) * dx(fluid), (p_a - ic_a) * q_a * dx(fluid)]
-J_ALE = block_derivative(F_ALE, X_ALE, Xt_ALE)
-
-problem_ALE = BlockNonlinearProblem(F_ALE, X_ALE, bc_ALE, J_ALE)
-solver_ALE = BlockPETScSNESSolver(problem_ALE)
-solver_ALE.parameters.update(snes_solver_parameters["snes_solver"])
-
-(u_a, p_a) = X_ALE.block_split()
+# sigma_a = -p_a * I + grad(u_a) + grad(u_a).T
+# ic_a = Constant(1) * div(u_a)
+#
+# # F_a = I + grad(u_a)
+# # E_a = 1/2 * (F_a.T * F_a - I)
+# # sigma_a = -p_a * I + 2 * E_a
+# # ic_a = tr(E_a)
+#
+# F_ALE = [-inner(sigma_a, grad(v_a)) * dx(fluid), (p_a - ic_a) * q_a * dx(fluid)]
+# J_ALE = block_derivative(F_ALE, X_ALE, Xt_ALE)
+#
+# problem_ALE = BlockNonlinearProblem(F_ALE, X_ALE, bc_ALE, J_ALE)
+# solver_ALE = BlockPETScSNESSolver(problem_ALE)
+# solver_ALE.parameters.update(snes_solver_parameters["snes_solver"])
+#
+# (u_a, p_a) = X_ALE.block_split()
 
 
 """
@@ -240,18 +263,17 @@ solver_ALE.parameters.update(snes_solver_parameters["snes_solver"])
 """
 
 for n in range(N):
+    eps.assign(e_all[n])
 
     print('-------------------------------------------------')
     print(f'solving problem with eps[{n:d}] = {e_all[n]:.2e}')
 
     print('solving FSI problem...')
-    solver.solve()
-    print('updating fluid geometry')
-    solver_ALE.solve()
+    (its, conv) = solver.solve()
+    # print('updating fluid geometry')
+    # solver_ALE.solve()
 
-    u_s_old.assign(u_s)
-
-    eps.assign(e_all[n])
+    # u_s_old.assign(u_s)
 
     save(n)
 
@@ -259,5 +281,8 @@ for n in range(N):
     # output_f.write(p_f, n)
     # output_s.write(u_s, n)
     # output_s.write(p_s, n)
+
+    if conv == False:
+        break
 
 print(U_0.vector()[:])
