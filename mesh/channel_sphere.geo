@@ -47,13 +47,13 @@ Plane Surface(1) = {1};
 
 // now let's add the circle to the domain and mesh it
 
-Point(8) = {1e-2, 0, 0, esc};
+// Point(8) = {1e-2, 0, 0, esc};
 
 Line(7) = {1, 2};
-Line(8) = {2, 8};
-Line(9) = {8, 3};
+// Line(8) = {2, 8};
+Line(8) = {2, 3};
 
-Curve Loop(2) = {7, 8, 9, 1};
+Curve Loop(2) = {7, 8, 1};
 Plane Surface(2) = {2};
 
 // create physical lines (for Fenics)
@@ -76,8 +76,6 @@ Physical Curve(5) = {4};
 // axis for solid
 Physical Curve(6) = {7, 8, 9};
 
-// sub-axis for solid
-Physical Curve(7) = {8};
 
 // bulk (fluid)
 Physical Surface(10) = {1};
