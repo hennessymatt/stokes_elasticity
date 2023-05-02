@@ -63,7 +63,6 @@ inlet = 3
 outlet = 4
 wall = 5
 solid_axis = 6
-solid_subaxis = 7
 
 # define the domains
 fluid = 10
@@ -135,12 +134,10 @@ bc_fluid_axis = DirichletBC(Vf.sub(0).sub(1), Constant(0), bdry, fluid_axis)
 bc_wall = DirichletBC(Vf.sub(0), Constant((0, 0)), bdry, wall)
 
 bc_solid_axis = DirichletBC(Vs.sub(0).sub(1), Constant(0), bdry, solid_axis)
-bc_pin = DirichletBC(Vs.sub(0).sub(1), Constant((0)), bdry, solid_subaxis)
-# bc_pres = DirichletBC(V.sub(3), Constant(0), bdry, solid_subaxis)
 
 
 bc_f = BlockDirichletBC([bc_inlet, bc_outlet, bc_fluid_axis, bc_wall])
-bc_s = BlockDirichletBC([bc_solid_axis, bc_pin])
+bc_s = BlockDirichletBC([bc_solid_axis])
 
 
 #---------------------------------------------------------------------
@@ -185,7 +182,7 @@ FUN4 = ic_s * q_s * dx(solid)
 FUN5 = inner(avg(eta), u_f("+") - as_vector([U_0("+"), 0])) * dS
 FUN6 = dot(ez, lam("+")) * V_0("+") * dS
 
-FUN7 = dot(ez, u_s) * g_s * dx
+FUN7 = dot(ez, u_s) * g_s * dx(solid)
 
 F_ALE = [-inner(sigma_a, grad(v_a)) * dx(fluid)]
 J_ALE = block_derivative(F_ALE, X_ALE, Xt_ALE)
