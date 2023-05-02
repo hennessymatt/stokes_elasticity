@@ -19,9 +19,12 @@ dir = 'output/'
     parameters
 """
 
-N = 50 * 2
+N = 200
 # e_all = np.logspace(-2, 0, N)
-e_all = np.linspace(1e-2, 0.5, N)
+# e_all = np.linspace(1e-2, 0.5, N)
+
+# e_all = [0.1]
+# t_all = np.linspace(0, 1, N)
 
 # N = 1
 # e_all = [1e-1]
@@ -88,19 +91,19 @@ P1 = FiniteElement("CG", mesh.ufl_cell(), 1)
 DGT = VectorElement("DGT", mesh.ufl_cell(), 1)
 P0 = FiniteElement("R", mesh.ufl_cell(), 0)
 
-mixed_element = BlockElement(P2, P1, DGT, P0)
-Vf = BlockFunctionSpace(mesh, mixed_element, restrict = [Of, Of, Sig, Sig])
+mixed_element = BlockElement(P2, P1, DGT, P0, P0)
+Vf = BlockFunctionSpace(mesh, mixed_element, restrict = [Of, Of, Sig, Sig, Of])
 Vs = BlockFunctionSpace(mesh, BlockElement(P2, P1, P0), restrict = [Os, Os, Os])
 
 
 # unknowns and test functions
 Yf = BlockTestFunction(Vf)
-(v_f, q_f, eta, V_0) = block_split(Yf)
+(v_f, q_f, eta, V_0, theta) = block_split(Yf)
 
 Xtf = BlockTrialFunction(Vf)
 
 Xf = BlockFunction(Vf)
-(u_f, p_f, lam, U_0) = block_split(Xf)
+(u_f, p_f, lam, U_0, zeta) = block_split(Xf)
 
 Ys = BlockTestFunction(Vs)
 (v_s, q_s, g_s) = block_split(Ys)
@@ -128,8 +131,8 @@ Y_ALE = BlockTestFunction(V_ALE)
 far_field = Expression(('(1 - x[1] * x[1] / 0.25) * t', '0'), degree=0, t = 1)
 
 bc_inlet = DirichletBC(Vf.sub(0), far_field, bdry, inlet)
-# bc_outlet = DirichletBC(Vf.sub(0), far_field, bdry, outlet)
-bc_outlet = DirichletBC(Vf.sub(1), Constant(0), bdry, outlet)
+bc_outlet = DirichletBC(Vf.sub(0), far_field, bdry, outlet)
+# bc_outlet = DirichletBC(Vf.sub(1), Constant(0), bdry, outlet)
 bc_fluid_axis = DirichletBC(Vf.sub(0).sub(1), Constant(0), bdry, fluid_axis)
 bc_wall = DirichletBC(Vf.sub(0), Constant((0, 0)), bdry, wall)
 
@@ -146,14 +149,17 @@ bc_s = BlockDirichletBC([bc_solid_axis])
 
 I = Identity(2)
 
-# fluids
+# ale
 F_a = I + grad(u_a)
 H_a = inv(F_a.T)
 J_a = det(F_a)
 E_a = 1/2 * (F_a.T * F_a - I)
-sigma_a = F_a * (Constant(10) * tr(E_a) * I + 2 * E_a / eps)
+sigma_a = F_a * (Constant(100) * tr(E_a) * I + 2 * E_a / eps)
 
+# e = 1/2 * (grad(u_a) + grad(u_a).T)
+# sigma_a = 100 * tr(e) * I + 2 / eps * e
 
+# fluids
 sigma_f = J_a * (-p_f * I + H_a * grad(u_f) + grad(u_f).T * H_a.T) * H_a
 ic_f = div(J_a * inv(F_a) * u_f)
 
@@ -174,7 +180,7 @@ ic_s = det(F) - 1
 ez = as_vector([1,0])
 
 FUN1 = -inner(sigma_f, grad(v_f)) * dx(fluid) + inner(lam("+"), v_f("+")) * dS
-FUN2 = ic_f * q_f * dx(fluid)
+FUN2 = ic_f * q_f * dx(fluid) + zeta * q_f * dx(fluid)
 
 FUN3 = -inner(sigma_s, grad(v_s)) * dx(solid) + inner(as_vector([f_s, 0]), v_s) * dx - inner(lam("-"), v_s("-")) * dS
 FUN4 = ic_s * q_s * dx(solid)
@@ -183,12 +189,13 @@ FUN5 = inner(avg(eta), u_f("+") - as_vector([U_0("+"), 0])) * dS
 FUN6 = dot(ez, lam("+")) * V_0("+") * dS
 
 FUN7 = dot(ez, u_s) * g_s * dx(solid)
+FUN8 = p_f * theta * dx(fluid)
 
 F_ALE = [-inner(sigma_a, grad(v_a)) * dx(fluid)]
 J_ALE = block_derivative(F_ALE, X_ALE, Xt_ALE)
 
 
-FUN_f = [FUN1, FUN2, FUN5, FUN6]
+FUN_f = [FUN1, FUN2, FUN5, FUN6, FUN8]
 FUN_s = [FUN3, FUN4, FUN7]
 
 JAC_f = block_derivative(FUN_f, Xf, Xtf)
@@ -210,7 +217,7 @@ solver_s.parameters.update(snes_solver_parameters["snes_solver"])
 
 
 # extract solution components
-(u_f, p_f, lam, U_0) = Xf.block_split()
+(u_f, p_f, lam, U_0, zeta) = Xf.block_split()
 (u_s, p_s, f_s) = Xs.block_split()
 
 """
@@ -220,6 +227,7 @@ mesh_f = SubMesh(mesh, subdomains, fluid)
 mesh_s = SubMesh(mesh, subdomains, solid)
 Vf = VectorFunctionSpace(mesh_f, "CG", 1)
 Vs = VectorFunctionSpace(mesh_s, "CG", 1)
+Vf0 = FunctionSpace(mesh_f, "CG", 1)
 Vs0 = FunctionSpace(mesh_s, "CG", 1)
 
 u_f_only = Function(Vf)
@@ -231,12 +239,15 @@ p_s_only = Function(Vs0)
 def save_f(n):
     u_f_only = project(u_f, Vf)
     u_a_only = project(u_a, Vf)
+    p_f_only = project(p_f, Vf0)
 
     u_f_only.rename("u_f", "u_f")
     u_a_only.rename("u_a", "u_a")
+    p_f_only.rename("p_f", "p_f")
 
     output_f.write(u_f_only, n)
     output_f.write(u_a_only, n)
+    output_f.write(p_f_only, n)
 
 def save_s(n):
     u_s_only = project(u_s, Vs)
@@ -276,6 +287,8 @@ print('solving fluid problem...')
 (its, conv_f) = solver_f.solve()
 save_f(0)
 save_s(0)
+print('f_0 =', f_s.vector()[:])
+print('zeta =', zeta.vector()[:])
 
 for n in range(1,N):
     eps.assign(e_all[n])
@@ -283,11 +296,8 @@ for n in range(1,N):
     print('-------------------------------------------------')
     print(f'solving problem with eps[{n:d}] = {e_all[n]:.2e}')
 
-
     print('solving solid problem...')
     (its, conv_s) = solver_s.solve()
-
-    print(f_s.vector()[:])
 
     save_s(n)
 
@@ -296,11 +306,16 @@ for n in range(1,N):
 
 
     print('updating fluid geometry')
-    solver_ALE.solve()
+    (its, conv) = solver_ALE.solve()
+
+    if conv == False:
+        break
 
     print('solving fluid problem...')
     (its, conv_f) = solver_f.solve()
     save_f(n)
+    print('f_0 =', f_s.vector()[:])
+    print('zeta =', zeta.vector()[:])
 
 
 print(U_0.vector()[:])
