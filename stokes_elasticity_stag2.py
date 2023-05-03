@@ -21,7 +21,7 @@ dir = 'output/'
 
 N = 200
 # e_all = np.logspace(-2, 0, N)
-# e_all = np.linspace(1e-2, 0.5, N)
+e_all = np.linspace(1e-2, 0.5, N)
 
 # e_all = [0.1]
 # t_all = np.linspace(0, 1, N)
@@ -160,7 +160,7 @@ sigma_a = F_a * (Constant(100) * tr(E_a) * I + 2 * E_a / eps)
 # sigma_a = 100 * tr(e) * I + 2 / eps * e
 
 # fluids
-sigma_f = J_a * (-p_f * I + H_a * grad(u_f) + grad(u_f).T * H_a.T) * H_a
+sigma_f = J_a * (-p_f * I + grad(u_f) * H_a.T + H_a * grad(u_f).T) * H_a
 ic_f = div(J_a * inv(F_a) * u_f)
 
 
