@@ -1,16 +1,21 @@
 """
 This is a monolithic solver for pressure-driven flow around a
-neo-Hookean sphere.  The problem is formulated using the ALE 
+neo-Hookean particle.  The particle is **free** to move with
+the flow.  However, equations are formulated in a moving
+frame that travels with the particle
+
+The problem is formulated using the ALE 
 method, which maps the deformed geometry to the initial
-(undeformed) geometry.  The problem is solved using the
-initial geometry; the deformed geometry can be seen in
-Paraview
+geometry.  The problem is solved using the
+initial geometry; the deformed geometry can by using the
+WarpByVector filter in Paraview using the displacement
+computed in the fluid domain.
 
 The problem uses Lagrange multipliers to ensure the centre of
 mass of the particle remains fixed as well as to impose
-continuity of traction
+continuity of stress
 
-The code works by initially solving the problem at a small
+The code works by initially solving the problem with a small
 value of epsilon (ratio of fluid stress to elastic stiffness)
 and then gradually ramping up epsilon.  If convergence is
 not obtained then the code tries again using a smaller value
@@ -55,13 +60,13 @@ output_s.parameters["flush_output"] = True
 """
 
 # the initial value of epsilon to try solving the problem with
-eps_try = 0
+eps_try = 0.1
 eps = Constant(eps_try)
 
 # the max value of epsilon
 eps_max = 1
 
-# the increment in epsilon to use if the code converges
+# the incremental increase in epsilon
 de = 0.05
 
 # the min and max values of the increments to make.
@@ -116,7 +121,8 @@ nn = FacetNormal(mesh); tt = as_vector((-nn[1], nn[0]))
 #---------------------------------------------------------------------
 P2 = VectorElement("CG", mesh.ufl_cell(), 2)
 P1 = FiniteElement("CG", mesh.ufl_cell(), 1)
-DGT = VectorElement("DGT", mesh.ufl_cell(), 1)
+# DGT = VectorElement("DGT", mesh.ufl_cell(), 1)
+DGT = VectorElement("CG", mesh.ufl_cell(), 1)
 P0 = FiniteElement("R", mesh.ufl_cell(), 0)
 
 """
@@ -129,7 +135,7 @@ u_s: solid displacement from nonlinear elasticity
 p_s: solid pressure from nonlinear elasticity
 
 f_0: Lagrange multiplier corresponding to the force needed to pin the
-solid in place 
+solid in place (should end up being zero since particle is free)
 
 U_0: the translational velocity of the solid
 
@@ -151,8 +157,6 @@ V = BlockFunctionSpace(mesh, mixed_element, restrict = [Of, Of, Os, Os, Os, Of, 
 
 X = BlockFunction(V)
 (u_f, p_f, u_s, p_s, f_0, U_0, lam, lam_p, u_a, lam_a) = block_split(X)
-
-
 
 # unknowns and test functions
 Y = BlockTestFunction(V)
@@ -220,7 +224,7 @@ F = I + grad(u_s)
 H = inv(F.T)
 
 # (non-dim) PK1 stress tensor and incompressibility condition
-sigma_s = 1 / eps * (F - H) - p_s * H
+Sigma_s = 1 / eps * (F - H) - p_s * H
 ic_s = det(F) - 1
 
 """
@@ -236,13 +240,13 @@ H_a = inv(F_a.T)
 # Jacobian for the fluid
 J_a = det(F_a)
 
-# stress tensor and incompressibility condition for the fluid
-sigma_f = J_a * (-p_f * I + grad(u_f) * H_a.T + H_a * grad(u_f).T) * H_a
+# PK1 stress tensor and incompressibility condition for the fluid
+Sigma_f = J_a * (-p_f * I + grad(u_f) * H_a.T + H_a * grad(u_f).T) * H_a
 ic_f = div(J_a * inv(F_a) * u_f)
 
 
 """
-ALE problem
+ALE problem: there are three different versions below
 """
 
 # Laplace
@@ -265,13 +269,13 @@ sigma_a = grad(u_a)
 ez = as_vector([1,0])
 
 # Stokes equations for the fluid
-FUN1 = -inner(sigma_f, grad(v_f)) * dx(fluid) + inner(lam("+"), v_f("+")) * dS
+FUN1 = -inner(Sigma_f, grad(v_f)) * dx(fluid) + inner(lam("+"), v_f("+")) * dS
 
 # Incompressibility for the fluid
 FUN2 = ic_f * q_f * dx(fluid) + lam_p * q_f * dx(fluid)
 
 # Nonlinear elasticity for the solid
-FUN3 = -inner(sigma_s, grad(v_s)) * dx(solid) + inner(as_vector([f_0, 0]), v_s) * dx(solid) - inner(lam("-"), v_s("-")) * dS
+FUN3 = -inner(Sigma_s, grad(v_s)) * dx(solid) + inner(as_vector([f_0, 0]), v_s) * dx(solid) - inner(lam("-"), v_s("-")) * dS
 
 # Incompressibility for the solid
 FUN4 = ic_s * q_s * dx(solid)
@@ -295,10 +299,9 @@ FUN9 = dot(ez, u_s) * g_0 * dx(solid)
 FUN10 = p_f * eta_p * dx(fluid)
 
 
+# Combine equations and compute Jacobian
 FUN = [FUN1, FUN2, FUN3, FUN4, FUN5, FUN6, FUN7, FUN8, FUN9, FUN10]
-
 JAC = block_derivative(FUN, X, Xt)
-
 
 #---------------------------------------------------------------------
 # set up the solver
@@ -312,11 +315,19 @@ solver.parameters.update(snes_solver_parameters["snes_solver"])
 # extract solution components
 (u_f, p_f, u_s, p_s, f_0, U_0, lam, lam_p, u_a, lam_a) = X.block_split()
 
+
+#---------------------------------------------------------------------
+# Set up code to save solid quanntities only on solid domain and
+# fluid quantities only on the fluid domain
+#---------------------------------------------------------------------
+
 """
-    quantities for separate meshes
+    Separate the meshes
 """
 mesh_f = SubMesh(mesh, subdomains, fluid)
 mesh_s = SubMesh(mesh, subdomains, solid)
+
+# Create function spaces for the velocity and displacement
 Vf = VectorFunctionSpace(mesh_f, "CG", 1)
 Vs = VectorFunctionSpace(mesh_s, "CG", 1)
 
@@ -324,7 +335,8 @@ u_f_only = Function(Vf)
 u_a_only = Function(Vf)
 u_s_only = Function(Vs)
 
-
+# Python function to save solution for a given value
+# of epsilon
 def save(eps):
     u_f_only = project(u_f, Vf)
     u_a_only = project(u_a, Vf)
@@ -343,6 +355,7 @@ def save(eps):
 # Solve
 #---------------------------------------------------------------------
 
+n = 0
 
 # last converged value of epsilon
 eps_conv = 0
@@ -351,29 +364,35 @@ eps_conv = 0
 while eps_conv <= eps_max:
 
     print('-------------------------------------------------')
-    print(f'attempting to solve problem with eps = {eps_try:.4e}')
+    print(f'attempting to solve problem with eps = {float(eps):.4e}')
+
+    # make a prediction of where the next solution based on how the solution
+    # changed over the last two increments
+    if n > 1:
+        X.block_vector()[:] = X_old.block_vector()[:] + (eps_try - eps_conv) * dX_deps
 
     (its, conv) = solver.solve()
 
     # if the solver converged...
     if conv:
 
+        n += 1
         # update value of eps_conv and save
         eps_conv = float(eps)
         save(eps_conv)
         
-        # if converence was fast, increase the
-        # increment in epsilon
-        if its < 3 and de < de_max:
-            de *= 1.01
-
         # update the value of epsilon to try to solve the problem with
         eps_try += de
 
         # copy the converged solution into old solution
         block_assign(X_old, X)
 
+        # print some info to the screen
+        print('Axial force on the particle: f_0 =', f_0.vector()[0])
+        print('Translational speed of the particle: U_0 =', U_0.vector()[0])
 
+        if n > 0:
+            dX_deps = (X.block_vector()[:] - X_old.block_vector()[:]) / de
 
     # if the solver diverged...
     if not(conv):
