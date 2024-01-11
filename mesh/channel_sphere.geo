@@ -7,16 +7,21 @@
 
 ////////////////////////////////////////////////////////////
 
-// element size
-es = 1e-1;
-esc = 1e-2;
+// element size for the fluid
+es = 6e-2;
+
+// element size at the fluid-solid interface
+esc = 5e-3;
+
+// element size for the solid
+esa = 3e-2;
 
 // length and half-width of the channel
 L = 10;
 H = 0.5;
 
 // radius of circle
-R = 0.3;
+R = 0.2;
 
 ////////////////////////////////////////////////////////////
 
@@ -24,7 +29,7 @@ R = 0.3;
 
 // Points for the circle
 Point(1) = {-R, 0, 0, esc};
-Point(2) = {0, 0, 0, esc};
+Point(2) = {0, 0, 0, esa};
 Point(3) = {R, 0, 0, esc};
 
 // Points for the domain corners
