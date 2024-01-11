@@ -250,15 +250,15 @@ ALE problem: there are three different versions below
 """
 
 # Laplace
-sigma_a = grad(u_a)
+# sigma_a = grad(u_a)
 
 # linear elasticity
-# nu_a = Constant(0.3)
-# E_a = 0.5 * (grad(u_a) + grad(u_a).T)
-# sigma_a = nu_a / (1 + nu_a) / (1 - 2 * nu_a) * tr(E_a) * I + 1 / (1 + nu_a) * E_a
+nu_a = Constant(0.1)
+E_a = 0.5 * (grad(u_a) + grad(u_a).T)
+sigma_a = nu_a / (1 + nu_a) / (1 - 2 * nu_a) * tr(E_a) * I + 1 / (1 + nu_a) * E_a
 
 # nonlinear elasticity
-# nu_a = Constant(0.3)
+# nu_a = Constant(0.48)
 # E_a = 0.5 * (F_a.T * F_a - I)
 # sigma_a = F_a * (nu_a / (1 + nu_a) / (1 - 2 * nu_a) * tr(E_a) * I + 1 / (1 + nu_a) * E_a)
 
