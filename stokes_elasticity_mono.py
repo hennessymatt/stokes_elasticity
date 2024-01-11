@@ -317,7 +317,7 @@ solver.parameters.update(snes_solver_parameters["snes_solver"])
 
 
 #---------------------------------------------------------------------
-# Set up code to save solid quanntities only on solid domain and
+# Set up code to save solid quanntities only on the solid domain and
 # fluid quantities only on the fluid domain
 #---------------------------------------------------------------------
 
@@ -366,8 +366,9 @@ while eps_conv <= eps_max:
     print('-------------------------------------------------')
     print(f'attempting to solve problem with eps = {float(eps):.4e}')
 
-    # make a prediction of where the next solution based on how the solution
-    # changed over the last two increments
+    # make a prediction of the next solution based on how the solution
+    # changed over the last two increments, e.g. using a simple
+    # extrapolation formula
     if n > 1:
         X.block_vector()[:] = X_old.block_vector()[:] + (eps_try - eps_conv) * dX_deps
 
@@ -391,6 +392,7 @@ while eps_conv <= eps_max:
         print('Axial force on the particle: f_0 =', f_0.vector()[0])
         print('Translational speed of the particle: U_0 =', U_0.vector()[0])
 
+        # approximate the derivative of the solution wrt epsilon
         if n > 0:
             dX_deps = (X.block_vector()[:] - X_old.block_vector()[:]) / de
 
