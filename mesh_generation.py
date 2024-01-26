@@ -7,7 +7,7 @@ import meshio
 def run_pygmsh(x_int, y_int):
     """
     Creates a mesh for the problem using pygmsh (a Python implementation
-    of gmsh).  
+    of gmsh).
 
     Inputs:
     -   x_int, y_int: positions of the fluid-solid interace
@@ -27,12 +27,12 @@ def run_pygmsh(x_int, y_int):
     H = 0.5
 
     # element size away from particle
-    res = 0.1 / 2
+    res = 0.1
 
     # element size at interface and in the solid
-    res_int = res / 6 / 2
+    res_int = res / 6
 
-    
+
     geometry = pygmsh.geo.Geometry()
     model = geometry.__enter__()
 
@@ -46,7 +46,7 @@ def run_pygmsh(x_int, y_int):
     points.append(model.add_point((-L/2, H, 0), mesh_size = res))
     points.append(model.add_point((-L/2, 0, 0), mesh_size = res))
 
-    
+
     # create outline of the fluid domain
     lines = [
         model.add_line(points[i], points[i+1]) for i in range(len(points)-1)
@@ -68,7 +68,7 @@ def run_pygmsh(x_int, y_int):
     surface_f = model.add_plane_surface(loop_f)
     surface_s = model.add_plane_surface(loop_s)
 
-    
+
     model.synchronize()
 
     # create labelled domains and boundaries
@@ -83,15 +83,15 @@ def run_pygmsh(x_int, y_int):
     model.add_physical([surface_s], "solid")
 
     # create a dict that stores ids of the boundaries and domains
-    domains = ["interface", 
-               "fluid_axis", 
-               "inlet", 
-               "outlet", 
+    domains = ["interface",
+               "fluid_axis",
+               "inlet",
+               "outlet",
                "wall",
                "solid_axis",
                "fluid",
                "solid"]
-    
+
     ids = {}
     for n in range(len(domains)):
         ids[domains[n]] = n+1
@@ -120,7 +120,7 @@ def create_mesh(mesh, cell_type, prune_z=False):
 
 def save_xdmf():
     """
-    Loads a .msh file created using run_pygmsh and converts it 
+    Loads a .msh file created using run_pygmsh and converts it
     into two xdmf files, one for the domains and another for
     the boundaries
     """
