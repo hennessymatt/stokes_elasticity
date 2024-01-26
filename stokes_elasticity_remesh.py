@@ -36,7 +36,7 @@ import matplotlib.pyplot as plt
 
 mr = Constant(0e-1)
 
-# define the boundaries 
+# define the boundaries
 circle = 1
 fluid_axis = 2
 inlet = 3
@@ -57,8 +57,8 @@ Define file names
 """
 
 # directory for file output
-# dir = '/media/eg21388/data/fenics/stokes_elasticity/'
-dir = '/home/matt/data/fenics/stokes_elasticity/'
+dir = '/media/eg21388/data/fenics/stokes_elasticity/'
+# dir = '/home/matt/data/fenics/stokes_elasticity/'
 
 
 output_eul_f = XDMFFile(dir + "eul_fluid.xdmf")
@@ -273,7 +273,7 @@ def ale_solve(eps_range, mesh, subdomains, bdry, n = 0, sol_eul = None):
         # F_0 = I
     else:
         F_0 = I
-    
+
     # deformation gradient tensor
     F_1 = I + grad(u_s)
     H_1 = inv(F_1.T)
@@ -383,8 +383,8 @@ def ale_solve(eps_range, mesh, subdomains, bdry, n = 0, sol_eul = None):
     #     u_f.interpolate(u_f_eul)
     #     p_f.interpolate(p_f_eul)
 
-    if not(X_0) == None:
-        block_assign(X, X_0)
+    #if not(X_0) == None:
+    #    block_assign(X, X_0)
 
     #---------------------------------------------------------------------
     # Set up code to save solid quanntities only on the solid domain and
@@ -460,7 +460,7 @@ def ale_solve(eps_range, mesh, subdomains, bdry, n = 0, sol_eul = None):
 
 
 #==============================================================================
-# Define the Eulerian solver 
+# Define the Eulerian solver
 #==============================================================================
 
 def eulerian_solver(mesh, subdomains, bdry, U_0, u_s_ale = None):
@@ -594,11 +594,11 @@ def eulerian_solver(mesh, subdomains, bdry, U_0, u_s_ale = None):
 
     #     def value_shape(self):
     #         return (2,)
-        
+
     # u_s.interpolate(InitialSolidGuess())
     # u_s.interpolate(Constant((1e5, 1e5)))
     # p_s.interpolate(Constant(1e5))
-    
+
 
     # """
     #     quantities for separate meshes
@@ -654,14 +654,14 @@ def eulerian_solver(mesh, subdomains, bdry, U_0, u_s_ale = None):
 
     return u_s, p_s, u_f, p_f
 
-    
+
 
 
 #==================================================================
 
 # generate points on the circle
 R = 0.2
-N_int = 40  
+N_int = 40
 theta = np.flip(np.linspace(0, np.pi, N_int))
 x_int = R * np.cos(theta)
 y_int = R * np.sin(theta)
