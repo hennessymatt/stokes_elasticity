@@ -465,7 +465,11 @@ def ale_solve(eps_range, mesh, subdomains, bdry, n=0, sol_eul=None):
     print('f_0 =', f_s.vector()[:])
     print('zeta =', zeta.vector()[:])
 
+    conv = True  # try to remesh by default
+    first_solve = True
+    
     for e in eps_range:
+        eps_ale_old = eps_ale
         eps_ale.assign(e)
 
         print('-------------------------------------------------')
@@ -480,6 +484,9 @@ def ale_solve(eps_range, mesh, subdomains, bdry, n=0, sol_eul=None):
             block_assign(Xf, Xf_old)
             block_assign(Xs, Xs_old)
             block_assign(X_ALE, X_ALE_old)
+            eps_ale.assign(eps_ale_old)
+            if first_solve:
+                conv = False  # Failed on first attempt so stop
             break
         else:
             block_assign(Xf_old, Xf)
@@ -487,31 +494,37 @@ def ale_solve(eps_range, mesh, subdomains, bdry, n=0, sol_eul=None):
             block_assign(X_ALE_old, X_ALE)
 
         print('updating fluid geometry')
-        (its, conv_ALE) = solver_ALE.solve()
+        (its, conv_ALE_local) = solver_ALE.solve()
 
-        if conv_ALE == False:
+        if conv_ALE_local == False:
             block_assign(Xf, Xf_old)
             block_assign(Xs, Xs_old)
             block_assign(X_ALE, X_ALE_old)
+            eps_ale.assign(eps_ale_old)
+            if first_solve:
+                conv = False  # Failed on first attempt to stop
             break
         else:
             block_assign(Xf_old, Xf)
             block_assign(Xs_old, Xs)
             block_assign(X_ALE_old, X_ALE)
 
-        if its > 4:
-            break
+        # if its > 4:
+        #     break
 
         print('solving fluid problem...')
         (its, conv_f) = solver_f.solve()
         save_f(n)
         print('f_0 =', f_s.vector()[:])
         print('zeta =', zeta.vector()[:])
+        print('U_0 =', U_0)
+
+        first_solve = False  # Passed first attempt
 
     x_new = np.array([x + u_s(x, y)[0] for (x, y) in zip(x_int, y_int)])
     y_new = np.array([y + u_s(x, y)[1] for (x, y) in zip(x_int, y_int)])
 
-    return conv_ALE, x_new, y_new, float(U_0.vector()[0]), u_s, float(eps_ale)
+    return conv, x_new, y_new, float(U_0.vector()[0]), u_s, float(eps_ale)
 
 
 # ==============================================================================
@@ -725,23 +738,15 @@ eps_inc = 0.05
 eps_range = eps_inc + np.linspace(0, eps_inc, 15)
 conv, x_int, y_int, U_0, u_s_ale, eps_term = ale_solve(eps_range, mesh, subdomains, bdry)
 
-plt.figure(0)
-mesh_s = SubMesh(mesh, subdomains, solid)
-Vs = VectorFunctionSpace(mesh_s, "CG", 1)
-u_s_plot = project(u_s_ale, Vs)
-ALE.move(mesh_s, u_s_plot)
-plot(mesh_s)
-
 if conv == True:
 
-    for n in range(5):
+    for n in range(10):
 
-        eps.assign(eps_range[-1])
-
+        eps.assign(eps_range[0] + eps_inc)  # eps for eulerian problem
         mesh, subdomains, bdry = build_mesh(x_int, y_int)
         sol_eul = eulerian_solver(mesh, subdomains, bdry, U_0, u_s_ale)
 
-        # Test we recover the original circular shape
+        # Plots we recover the original circular shape
         plt.figure(2 * n)
         mesh_s = SubMesh(mesh, subdomains, solid)
         plot(mesh_s)
@@ -754,10 +759,11 @@ if conv == True:
         plot(mesh_s)
         plt.plot(x_int_circle, y_int_circle)
 
+        # Update new range - try to increase by 0.05 from old eps_term
         eps_range = eps_range + eps_inc
         conv_ale, x_int, y_int, U_0, u_s_ale, eps_term = ale_solve(eps_range, mesh, subdomains, bdry, n=1,
                                                                    sol_eul=sol_eul)
-
+        eps_inc = eps_term - eps_range[0]  # the amount we managed to increased epsilon before divergence
         if not (conv_ale):
             break
 plt.show()
