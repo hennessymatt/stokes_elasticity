@@ -713,12 +713,11 @@ theta = np.flip(np.linspace(0, np.pi, N_int))
 x_int = R * np.cos(theta)
 y_int = R * np.sin(theta)
 
+x_int_circle = R * np.cos(theta)
+y_int_circle = R * np.sin(theta)
+
 # create mesh
 mesh, subdomains, bdry = build_mesh(x_int, y_int)
-
-plt.figure(0)
-plot(mesh)
-plt.show()
 
 # first solve of the ALE problem
 eps_inc = 0.05
@@ -734,16 +733,25 @@ if conv == True:
         mesh, subdomains, bdry = build_mesh(x_int, y_int)
         sol_eul = eulerian_solver(mesh, subdomains, bdry, U_0, u_s_ale)
 
-        plt.figure(n+1)
-        plot(mesh)
-        plt.show()
+        # Test we recover the original circular shape
+        plt.figure(2*n)
+        mesh_s = SubMesh(mesh, subdomains, solid)
+        plot(mesh_s)
+
+        u_0_eul = -sol_eul[0]
+        Vs = VectorFunctionSpace(mesh_s, "CG", 1)
+        u_s_plot = project(u_0_eul, Vs)
+        ALE.move(mesh_s, u_s_plot)
+        plt.figure(2*n+1)
+        plot(mesh_s)
+        plt.plot(x_int_circle, y_int_circle)
 
         eps_range = eps_range + eps_inc
         conv_ale, x_int, y_int, U_0, u_s_ale, eps_term = ale_solve(eps_range, mesh, subdomains, bdry, n=1, sol_eul=sol_eul)
 
         if not(conv_ale):
             break
-
+plt.show()
 # eps_inc = 0.05
 # for e in np.arange(0.2, 1, eps_inc):
 

@@ -357,9 +357,13 @@ def ale_solve(eps_range, mesh, subdomains, bdry, n=0, sol_eul=None):
     FUN8 = p_f * eta_p * r * dx(fluid)
 
     # ALE problem
+    # linear elasticity
     F_ALE = [-inner(sigma_a, grad(v_a)) * r * dx(fluid)
              - 1 / (1 + nu_a) * u_a[1] * v_a[1] / r * dx(fluid)  # Extra term from E_a
              - nu_a / (1 + nu_a) / (1 - 2 * nu_a) * diva(u_a, r) * v_a[1] * dx(fluid)]  # Extra term from diva(u_a)
+    # laplace
+    # F_ALE = [-inner(sigma_a, grad(v_a)) * r * dx(fluid)
+    #          - u_a[1] * v_a[1] / r * dx(fluid)]  # Extra term from grad u_a
     J_ALE = block_derivative(F_ALE, X_ALE, Xt_ALE)
 
     FUN_f = [FUN1, FUN2, FUN5, FUN6, FUN8]
@@ -727,11 +731,10 @@ Vs = VectorFunctionSpace(mesh_s, "CG", 1)
 u_s_plot = project(u_s_ale, Vs)
 ALE.move(mesh_s, u_s_plot)
 plot(mesh_s)
-plt.show()
 
 if conv == True:
 
-    for n in range(10):
+    for n in range(5):
 
         eps.assign(eps_range[-1])
 
@@ -750,7 +753,6 @@ if conv == True:
         plt.figure(2 * n + 1)
         plot(mesh_s)
         plt.plot(x_int_circle, y_int_circle)
-        plt.show()
 
         eps_range = eps_range + eps_inc
         conv_ale, x_int, y_int, U_0, u_s_ale, eps_term = ale_solve(eps_range, mesh, subdomains, bdry, n=1,
@@ -758,7 +760,7 @@ if conv == True:
 
         if not (conv_ale):
             break
-
+plt.show()
 # eps_inc = 0.05
 # for e in np.arange(0.2, 1, eps_inc):
 
